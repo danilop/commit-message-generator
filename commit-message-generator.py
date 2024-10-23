@@ -27,6 +27,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Add this constant near the top of the file, after other imports and constants
+MAX_PROMPT_SIZE = 14000  # Adjust this value as needed
+
 @dataclass
 class FileInfo:
     path: str
@@ -131,9 +134,9 @@ def format_file_info_xml(file_info: FileInfo) -> str:
     """Format file information as XML."""
     status = "new" if file_info.history == "New file" else "modified"
     return f"""<file path="{file_info.path}" status="{status}">
-    <content>{escape_xml_content(file_info.content[:1000])}</content>
-    <history>{escape_xml_content(file_info.history[:500])}</history>
     <diff>{escape_xml_content(file_info.diff)}</diff>
+    <history>{escape_xml_content(file_info.history[:500])}</history>
+    <content>{escape_xml_content(file_info.content[:1000])}</content>
 </file>"""
 
 def invoke_text_model(prompt: str) -> Optional[str]:
@@ -185,6 +188,11 @@ def generate_commit_prompt(files_info: List[FileInfo]) -> str:
     </commit_request>
     
     Please generate a commit message that best describes these changes."""
+    
+    if len(prompt) > MAX_PROMPT_SIZE:
+        truncation_message = f"\n\nNote: The prompt has been truncated due to size limitations. Some file information may have been omitted."
+        prompt = prompt[:MAX_PROMPT_SIZE - len(truncation_message)] + truncation_message
+        logger.warning(f"Prompt exceeded maximum size and was truncated to {MAX_PROMPT_SIZE} characters.")
     
     return prompt
 
