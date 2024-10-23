@@ -34,17 +34,18 @@ Elevate your Git workflow with intelligent, context-aware commit messages genera
 
 5. **Run the script from within your repository:**
    ```
-   commit-message-generator
+   commit-message-generator.py
    ```
 
 5. **Review and approve** the generated commit message.
 
 ## 🛠️ Usage
 
-After staging your changes in Git, run the script:
+After staging your changes in Git, run the script (it should be in your `PATH`):
 
 ```
-python commit-message-generator.py [--debug]
+commit-message-generator.py [--debug]
+```
 
 The script will:
 1. Analyze staged changes
@@ -52,7 +53,7 @@ The script will:
 3. Display the message for your review
 4. Commit the changes if you approve
 
-Use the `--debug` flag for detailed logging.
+Use the `--debug` flag for (very) detailed logging.
 
 ## 🧠 How It Works
 
@@ -62,6 +63,46 @@ Use the `--debug` flag for detailed logging.
 4. **Message Generation**: The model generates a contextually relevant and well-formatted commit message.
 5. **User Interaction**: Presents the generated message for user review and approval.
 6. **Git Integration**: Commits the changes using the approved message.
+
+## 📝 Sample Output
+
+```
+% git status
+On branch main
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   commit-message-generator.py
+
+no changes added to commit (use "git add" and/or "git commit -a")
+% git add . 
+% commit-message-generator.py
+2024-10-23 16:50:40,625 - INFO - Found 1 staged files
+2024-10-23 16:50:40,648 - INFO - Found 0 non-staged changes
+2024-10-23 16:50:48,496 - INFO - 
+Suggested commit message:
+--------------------------------------------------
+Add prompt truncation and move XML order for better performance
+
+- Introduce MAX_PROMPT_SIZE constant to limit prompt size
+- Truncate prompt if it exceeds maximum size and log a warning
+- Reorder XML tags to send diffs before content for efficiency
+
+This commit optimizes the commit message generator by:
+
+- Adding a maximum prompt size limit to avoid sending excessively large prompts to the model
+- Truncating prompts that exceed the size limit and logging a warning
+- Reordering the XML tags to send file diffs before content, allowing the model to process diffs first for better performance
+
+These changes help improve the efficiency and reliability of the commit message generation process, especially for repositories with large files or many changes.
+--------------------------------------------------
+
+Would you like to use this commit message? (y/n): y
+2024-10-23 16:50:56,662 - INFO - Successfully committed changes: [main 98971fb] Add prompt truncation and move XML order for better performance
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+Changes committed successfully!
+```
 
 ## 🔧 Configuration
 
