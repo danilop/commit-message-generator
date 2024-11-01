@@ -44,7 +44,23 @@ Elevate your Git workflow with intelligent, context-aware commit messages genera
 After staging your changes in Git, run the script (it should be in your `PATH`):
 
 ```
-commit-message-generator.py [--debug]
+commit-message-generator.py [options]
+```
+
+### Command Line Options
+
+- `--debug`: Enable detailed debug logging
+- `--include-content`: Include file content in the analysis (disabled by default)
+- `--include-history`: Include file commit history in the analysis (disabled by default)
+- `--context-lines N`: Number of context lines to show in git diff (default: 3)
+
+Example:
+```bash
+# Run with debug logging and include file history
+commit-message-generator.py --debug --include-history
+
+# Include both content and history, with 5 lines of context
+commit-message-generator.py --include-content --include-history --context-lines 5
 ```
 
 The script will:
@@ -52,8 +68,6 @@ The script will:
 2. Generate a commit message using an AI model
 3. Display the message for your review
 4. Commit the changes if you approve
-
-Use the `--debug` flag for (very) detailed logging.
 
 ## 🧠 How It Works
 
@@ -124,16 +138,7 @@ If you encounter issues, run the script with the `--debug` flag for more detaile
 
 ## 🤝 Contributing
 
-Contributions are welcome! Here's how you can contribute:
-
-1. Fork the repository
-2. Create a new branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Commit your changes (`git commit -m 'Add some amazing feature'`)
-5. Push to the branch (`git push origin feature/amazing-feature`)
-6. Open a Pull Request
-
-Please ensure your code adheres to the existing style and includes appropriate tests.
+Contributions are welcome! Please ensure your code adheres to the existing style and includes appropriate tests.
 
 ## 📄 License
 
