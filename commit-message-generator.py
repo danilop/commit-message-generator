@@ -1,12 +1,12 @@
 #! /usr/bin/env python3
 
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional
 import subprocess
-import json
 import logging
 from pathlib import Path
 from xml.sax.saxutils import escape
 from dataclasses import dataclass
+import time
 
 import boto3
 
@@ -14,7 +14,7 @@ AWS_REGION = 'us-east-1'
 
 MODEL_ID = 'us.anthropic.claude-3-sonnet-20240229-v1:0'
 
-bedrock = boto3.client(
+bedrock_runtime = boto3.client(
     service_name='bedrock-runtime',
     region_name=AWS_REGION
 )
@@ -36,6 +36,13 @@ class FileInfo:
     content: str
     history: str
     diff: str
+
+@dataclass
+class CommitOptions:
+    include_content: bool
+    include_history: bool
+    context_lines: int
+    debug: bool
 
 def setup_logging(debug: bool = False) -> None:
     """Configure logging level and format."""
@@ -62,8 +69,8 @@ def get_staged_files() -> List[str]:
             check=True
         )
         # Filter for staged files (those starting with 'A', 'M', 'R', or 'D')
-        files = [line.split()[-1] for line in result.stdout.splitlines() 
-                 if line.startswith(('A', 'M', 'R', 'D'))]
+        files = list(set([line.split()[-1] for line in result.stdout.splitlines() 
+                          if line.startswith(('A', 'M', 'R', 'D'))]))
         logger.info(f"Found {len(files)} staged files")
         return files
     except subprocess.CalledProcessError as e:
@@ -78,18 +85,24 @@ def get_file_content(file_path: str) -> str:
             logger.warning(f"File not found: {file_path}")
             return ""
         
-        with open(path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        # Should handle different encodings and binary files
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            logger.warning(f"Could not read {file_path} as UTF-8, skipping content")
+            return ""
+        
         logger.debug(f"Read {len(content)} characters from {file_path}")
         return content
     except Exception as e:
         logger.error(f"Error reading file {file_path}: {str(e)}")
         return ""
 
-def get_staged_diff(file_path: Optional[str] = None) -> str:
+def get_staged_diff(file_path: Optional[str] = None, context_lines: int = 3) -> str:
     """Get the diff of staged changes for a specific file or all files."""
     try:
-        cmd = ['git', 'diff', '--staged']
+        cmd = ['git', 'diff', '--staged', f'-U{context_lines}']
         if file_path:
             cmd.append(file_path)
             
@@ -130,37 +143,48 @@ def get_file_info(file_path: str) -> FileInfo:
         diff=get_staged_diff(file_path)
     )
 
-def format_file_info_xml(file_info: FileInfo) -> str:
+def format_file_info_xml(file_info: FileInfo, options: CommitOptions) -> str:
     """Format file information as XML."""
     status = "new" if file_info.history == "New file" else "modified"
-    return f"""<file path="{file_info.path}" status="{status}">
-    <diff>{escape_xml_content(file_info.diff)}</diff>
-    <history>{escape_xml_content(file_info.history[:500])}</history>
-    <content>{escape_xml_content(file_info.content[:1000])}</content>
-</file>"""
-
-def invoke_text_model(prompt: str) -> Optional[str]:
-    """Invoke a text model via Amazon Bedrock Converse API."""
-    try:
-        response = bedrock.converse(
-            modelId=MODEL_ID,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [ { "text": prompt } ]
-                }
-            ]
-        )
-        
-        return response['output']['message']['content'][0]['text']
+    xml = f"""<file path="{file_info.path}" status="{status}">
+    <diff>{escape_xml_content(file_info.diff)}</diff>"""
     
-    except Exception as e:
-        logger.error(f"Error invoking model: {str(e)}")
-        return None
+    if options.include_history:
+        xml += f"\n    <history>{escape_xml_content(file_info.history[:500])}</history>"
+    if options.include_content:
+        xml += f"\n    <content>{escape_xml_content(file_info.content[:1000])}</content>"
+    
+    xml += "\n</file>"
+    return xml
 
-def generate_commit_prompt(files_info: List[FileInfo]) -> str:
+def invoke_text_model(prompt: str, max_retries: int = 3) -> Optional[str]:
+    """Invoke a text model via Amazon Bedrock Converse API."""
+    for attempt in range(max_retries):
+        try:
+            response = bedrock_runtime.converse(
+                modelId=MODEL_ID,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [ { "text": prompt } ]
+                    }
+                ]
+            )
+            
+            return response['output']['message']['content'][0]['text']
+        
+        except boto3.client('bedrock-runtime').exceptions.ThrottlingException:
+            if attempt == max_retries - 1:
+                logger.error("Max retries reached for rate limit")
+                return None
+            time.sleep(2 ** attempt)  # Exponential backoff
+        except Exception as e:
+            logger.error(f"Error invoking model: {str(e)}")
+            return None
+
+def generate_commit_prompt(files_info: List[FileInfo], options: CommitOptions) -> str:
     """Generate a prompt to create a commit message."""
-    files_xml = "\n".join(format_file_info_xml(info) for info in files_info)
+    files_xml = "\n".join(format_file_info_xml(info, options) for info in files_info)
     
     is_initial_commit = all(not info.history for info in files_info)
     
@@ -198,6 +222,10 @@ def generate_commit_prompt(files_info: List[FileInfo]) -> str:
 
 def commit_changes(message: str) -> bool:
     """Commit changes with the given message."""
+    if not message or message.isspace():
+        logger.error("Empty commit message provided")
+        return False
+        
     try:
         result = subprocess.run(
             ['git', 'commit', '-m', message],
@@ -243,9 +271,9 @@ def prompt_for_override() -> bool:
     response = input("There are non-staged changes. Do you want to continue anyway? (y/n): ").lower()
     return response == 'y'
 
-def main(debug: bool = False) -> None:
+def main(options: CommitOptions) -> None:
     """Main function to generate git commit message."""
-    setup_logging(debug)
+    setup_logging(options.debug)
     
     # Check if the current directory is a Git repository
     if not is_git_repository():
@@ -286,7 +314,7 @@ def main(debug: bool = False) -> None:
         files_info = [get_file_info(file_path) for file_path in staged_files]
         
         # Generate prompt
-        prompt = generate_commit_prompt(files_info)
+        prompt = generate_commit_prompt(files_info, options)
         
         # Get commit message
         commit_message = invoke_text_model(prompt)
@@ -307,13 +335,26 @@ def main(debug: bool = False) -> None:
             
     except Exception as e:
         logger.error(f"An error occurred: {str(e)}")
-        if debug:
+        if options.debug:
             raise
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Generate git commit messages using an AI model.')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    parser.add_argument('--include-content', action='store_true', 
+                       help='Include file content in the prompt (disabled by default)')
+    parser.add_argument('--include-history', action='store_true',
+                       help='Include file history in the prompt (disabled by default)')
+    parser.add_argument('--context-lines', type=int, default=3,
+                       help='Number of context lines to show in git diff (default: 3)')
     args = parser.parse_args()
     
-    main(debug=args.debug)
+    options = CommitOptions(
+        include_content=args.include_content,
+        include_history=args.include_history,
+        context_lines=args.context_lines,
+        debug=args.debug
+    )
+    
+    main(options)
