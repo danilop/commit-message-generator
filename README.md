@@ -66,7 +66,7 @@ Use the `--debug` flag for (very) detailed logging.
 
 ## 📝 Sample Output
 
-```
+```sh
 % git status
 On branch main
 Changes not staged for commit:
